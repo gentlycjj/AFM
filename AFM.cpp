@@ -21,6 +21,12 @@ RPI_V2_GPIO_P1_13->RPI_GPIO_P1_13
 ::
 */
 
+#include<opencv2/opencv.hpp>
+#include<opencv/highgui.h>
+#include<opencv2/core/core.hpp>
+#include<opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp> 
+
 #include <bcm2835.h>  
 #include <stdio.h>
 #include <unistd.h>
@@ -28,12 +34,15 @@ RPI_V2_GPIO_P1_13->RPI_GPIO_P1_13
 #include <math.h>
 #include <errno.h>
 #include <stdlib.h>
+using namespace cv;
 
 //#include <wiringPi.h>
-#include <opencv2/core/core.hpp> 
-#include <opencv2/imgproc/imgproc.hpp> 
-#include <opencv2/highgui/highgui.hpp>
+
+
+
 #include <sys/time.h>
+
+
 
 
 //CS      -----   SPICS  
@@ -994,6 +1003,14 @@ int  main(int argc, char* argv[])
 
     while(1)
     {
+	if(!cvGetWindowHandle("AFM"))    //if the "x" in the image window is clicked, terminate the program
+	{
+	    break;
+	}
+	if(!cvGetWindowHandle("setting"))
+	{
+	    break;
+	}
         if(g_switch_value)
         {
 
@@ -1065,6 +1082,15 @@ int  main(int argc, char* argv[])
                     break;
                 scanminlevel=scanminold+contr*(scanmaxold-scanminold)/100;
                 scanmaxlevel=scanmaxold;
+
+		if(!cvGetWindowHandle("AFM"))
+		{
+	    		break;
+		}
+		if(!cvGetWindowHandle("setting"))
+		{
+	    		break;
+		}
                 for(scanx=0;scanx<scanrangex;scanx++)
                 {
                     while((ADS1256_Scan() == 0));
@@ -1132,9 +1158,20 @@ int  main(int argc, char* argv[])
 
             DAy=0.0;                                             //scany return 0
             Write_DAC8552(0x34, Voltage_Convert(5.0,DAy));    	//Write channel B buffer (0x34)
+	    if(!cvGetWindowHandle("AFM"))
+	{
+	    break;
+	}
+	if(!cvGetWindowHandle("setting"))
+	{
+	    break;
+	}
 
             sprintf(name,"%d.jpg",count);
-            cvSaveImage(name,img);
+            //cvSaveImage("saveimage",img,0);
+            Mat imgnew;
+            imgnew=cvarrToMat(img);
+            imwrite(name,imgnew);// 20180622
             count++;
             if(count>=21)
             {
