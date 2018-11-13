@@ -21,6 +21,12 @@ RPI_V2_GPIO_P1_13->RPI_GPIO_P1_13
 ::
 */
 
+#include<opencv2/opencv.hpp>
+#include<opencv/highgui.h>
+#include<opencv2/core/core.hpp>
+#include<opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp> 
+
 #include <bcm2835.h>  
 #include <stdio.h>
 #include <unistd.h>
@@ -28,12 +34,16 @@ RPI_V2_GPIO_P1_13->RPI_GPIO_P1_13
 #include <math.h>
 #include <errno.h>
 #include <stdlib.h>
+#include "bmp.h"
+using namespace cv;
 
 //#include <wiringPi.h>
-#include <opencv2/core/core.hpp> 
-#include <opencv2/imgproc/imgproc.hpp> 
-#include <opencv2/highgui/highgui.hpp>
+
+
+
 #include <sys/time.h>
+
+
 
 
 //CS      -----   SPICS  
@@ -234,6 +244,100 @@ void on_change(int position);
 /***************************************************/
 void Write_DAC8552(uint8_t channel, uint16_t Data);
 uint16_t Voltage_Convert(float Vref, float voltage);
+
+
+/******************************************
+* Functions:save image           *
+******************************************/
+bool clSaveImage(const char* path, uint8_t image[], int32_t scan_min,int32_t scan_max)
+{
+	FILE *pFile;
+	unsigned short fileType;
+	ClBitMapFileHeader bmpFileHeader;
+	ClBitMapInfoHeader bmpInfoHeader;
+	int step;
+	int offset;
+	unsigned char pixVal = '\0';
+	int i, j;
+	ClRgbQuad* quad;
+
+	pFile = fopen(path, "wb");
+	if (!pFile)
+	{
+		return false;
+	}
+
+	fileType = 0x4D42;
+	fwrite(&fileType, sizeof(unsigned short), 1, pFile);
+
+	
+	
+	step = w;
+	offset = step % 4;
+	if (offset != 4)
+	{
+		step += 4 - offset;
+	}
+
+	bmpFileHeader.bfSize = 54 + 256 * 4 + h*step;
+	bmpFileHeader.bfReserved1 = 0;
+	bmpFileHeader.bfReserved2 = 0;
+	bmpFileHeader.bfOffBits = 54 + 256 * 4;
+	fwrite(&bmpFileHeader, sizeof(ClBitMapFileHeader), 1, pFile);
+
+	bmpInfoHeader.biSize = 40;
+	bmpInfoHeader.biWidth = w;
+	bmpInfoHeader.biHeight = h;
+	bmpInfoHeader.biPlanes = 1;
+	bmpInfoHeader.biBitCount = 8;
+	bmpInfoHeader.biCompression = 0;
+	bmpInfoHeader.biSizeImage = 4000;
+	bmpInfoHeader.biXPelsPerMeter = 4000;
+	bmpInfoHeader.biYPelsPerMeter = 10;
+	bmpInfoHeader.biClrUsed = 256;
+	bmpInfoHeader.biClrImportant = 1000;
+	fwrite(&bmpInfoHeader, sizeof(ClBitMapInfoHeader), 1, pFile);
+
+	quad = (ClRgbQuad*)malloc(sizeof(ClRgbQuad) * 256);
+	for (i = 0; i<128; i++)
+	{
+		quad[i].rgbBlue = 0;
+		quad[i].rgbGreen = i;
+		quad[i].rgbRed = 2 * i;
+		quad[i].rgbReserved = 0;
+	}
+	for (i = 128; i<256; i++)
+	{
+		quad[i].rgbBlue = 2 * (i - 128) + 1;;
+		quad[i].rgbGreen = i;
+		quad[i].rgbRed = 255;
+		quad[i].rgbReserved = 0;
+	}
+	fwrite(quad, sizeof(ClRgbQuad), 256, pFile);
+	free(quad);
+
+	for (i = h - 1; i>-1; i--)
+	{
+		for (j = 0; j<w; j++)
+		{
+			pixVal = image[i*w+j];
+			fwrite(&pixVal, sizeof(unsigned char), 1, pFile);
+		}
+                if(offset!=0)
+                {
+                	for(j=0;j<4-offset;j++)
+                        {
+                            pixVal=0;
+                            fwrite(&pixVal, sizeof(unsigned char), 1, pFile);
+                        }
+                }
+
+	}
+	fclose(pFile);
+
+	return true;
+}
+
 /******************************************
  * Functions:show switch change           *
  ******************************************/
@@ -864,6 +968,7 @@ int  main(int argc, char* argv[])
 
     uint16_t scanx,scany;
     uint8_t image[w*h*3];
+    uint8_t image1[h*w];
     float DAx=0.0;
     float DAy=0.0;
     float scanstep=voltmax/w;
@@ -887,6 +992,8 @@ int  main(int argc, char* argv[])
     int delay=30;
     int inc_x=100;
     int inc_y=100;
+	bool save_flag = false;
+	char* fileName;
 
     CvSize imgSize;
     imgSize.width = w;
@@ -994,6 +1101,14 @@ int  main(int argc, char* argv[])
 
     while(1)
     {
+		if(!cvGetWindowHandle("AFM"))    //if the "x" in the image window is clicked, terminate the program
+		{
+			break;
+		}
+		if(!cvGetWindowHandle("setting"))
+		{
+			break;
+		}
         if(g_switch_value)
         {
 
@@ -1022,18 +1137,19 @@ int  main(int argc, char* argv[])
                         DAx=DAx-DAx*scanstep*cer;         //correct nonlinear
 
                         Write_DAC8552(0x30, Voltage_Convert(5.0,DAx));    	//Write channel A buffer (0x30)
-				if(scanx>=10 && scany>=10 && scanx<=190){
+						if(scanx>=10 && scany>=10 && scanx<=190)
+						{
                         if(volt[scany][scanx]>scanmax)
                             scanmax=volt[scany][scanx];
                         if(volt[scany][scanx]<scanmin)
                             scanmin=volt[scany][scanx];
-				}
+						}
 
                     }
 
                     DAx=0.0;                                             //scanx return to 0.0
                     Write_DAC8552(0x30, Voltage_Convert(5.0,DAx));    	//Write channel A buffer (0x30)
-				cvWaitKey(delay);
+					cvWaitKey(delay);
 
                     DAy=DAy+scanstep;             //scany step
                     DAy=DAy-DAy*scanstep*cer;         //correct nonlinear
@@ -1065,6 +1181,15 @@ int  main(int argc, char* argv[])
                     break;
                 scanminlevel=scanminold+contr*(scanmaxold-scanminold)/100;
                 scanmaxlevel=scanmaxold;
+
+				if(!cvGetWindowHandle("AFM"))
+				{
+	    			break;
+				}
+				if(!cvGetWindowHandle("setting"))
+				{
+	    			break;
+				}
                 for(scanx=0;scanx<scanrangex;scanx++)
                 {
                     while((ADS1256_Scan() == 0));
@@ -1077,12 +1202,12 @@ int  main(int argc, char* argv[])
 
                     volt[scany][scanx]=volt[scany][scanx]+(inc_x-100)*(float)((200-scanx)*50);      //adjust the inclination of x
                     volt[scany][scanx]=volt[scany][scanx]+(inc_y-100)*(float)((200-scany)*50);      //adjust the inclination of y
-			if(scanx>=10 && scanx<=190 && scany>=10 && scany<=190){
-                    if(volt[scany][scanx]>scanmax)
-                        scanmax=volt[scany][scanx];
-                    if(volt[scany][scanx]<scanmin)
-                        scanmin=volt[scany][scanx];
-			}
+					if(scanx>=10 && scanx<=190 && scany>=10 && scany<=190){
+						if(volt[scany][scanx]>scanmax)
+							scanmax=volt[scany][scanx];
+						if(volt[scany][scanx]<scanmin)
+							scanmin=volt[scany][scanx];
+					}
                     if(scanmax==scanmin)
                     {
                         image_tmp=255;
@@ -1101,7 +1226,7 @@ int  main(int argc, char* argv[])
                                 // image[i]=255*(volt[scany][scanx]-scanmin)/5000000;
                     }
 
-
+					image1[scany*w+scanx] = image_tmp;
                     if(image_tmp>=128)
                     {
                         ptr[3*scanx]=2*(image_tmp-128)+1;
@@ -1132,9 +1257,24 @@ int  main(int argc, char* argv[])
 
             DAy=0.0;                                             //scany return 0
             Write_DAC8552(0x34, Voltage_Convert(5.0,DAy));    	//Write channel B buffer (0x34)
+			if(!cvGetWindowHandle("AFM"))
+			{
+				break;
+			}
+			if(!cvGetWindowHandle("setting"))
+			{
+				break;
+			}
+			sprintf(name,"/home/pi/Desktop/AFM/%d.bmp",count);
+                        fileName=name;
+			save_flag = clSaveImage(fileName, image1,scanmin,scanmax);//new imagesave 2018/11/13
 
-            sprintf(name,"%d.jpg",count);
-            cvSaveImage(name,img);
+
+            
+            //cvSaveImage("saveimage",img,0);
+            //Mat imgnew;
+            //imgnew=cvarrToMat(img);
+            //imwrite(name,imgnew);// 20180622
             count++;
             if(count>=21)
             {
